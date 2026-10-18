@@ -178,9 +178,8 @@ function renderMap() {
   for (var i=0;i<PROVINCES.length;i++) {
     var p=PROVINCES[i];
     var col=fills[p.id]||'#c8d8e8';
-    var isCur=cur&&p.id===cur.id&&phase==='playing'&&mode==='quiz';
     var isDone=done[p.id];
-    var sw=isCur?2.5:isDone?1.5:0.8;
+    var sw=isDone?1.5:0.8;
     var strokeCol=isDone?'#ffffff':'#1a1a2e';
     if(col==='#FF9800'||col==='#F44336'||col==='#7B0000') strokeCol='#fff';
     html+='<path data-id="'+p.id+'" d="'+p.path+
