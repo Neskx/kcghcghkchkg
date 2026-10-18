@@ -151,39 +151,99 @@ function norm(s){
     .replace(/é/g,'e').replace(/\s+/g,' ').trim();
 }
 
+// ── Skriv mode engine ───────────────────────────────────
+// Each province keeps its own wrong-try count (typeAtt). Leaving a province
+// for another keeps its count, so switching cities can never reset to white.
+var typeAtt={};      // id -> wrong typed tries so far
+var TYPE_MAX=4;      // 4 wrong tries -> province is revealed (missed)
+
+function shakeInput(){
+  var inp=document.getElementById('typeInput');
+  inp.classList.remove('shake'); void inp.offsetWidth;
+  inp.classList.add('shake');
+  setTimeout(function(){inp.classList.remove('shake');inp.focus();},350);
+}
+
+function typeSelect(id){
+  typeSelected=id;
+  var inp=document.getElementById('typeInput');
+  inp.value='';
+  inp.placeholder=id?'Vilket landskap? Skriv och tryck Enter':'Klicka ett landskap på kartan...';
+  updateDots(); updateHUD(); renderMap();
+  setTimeout(function(){inp.focus();},30);
+}
+
+function typeSolvedCount(){
+  var n=0; for(var i=0;i<PROVINCES.length;i++) if(processed[PROVINCES[i].id]) n++;
+  return n;
+}
+
 function handleTypeInput(e){
+  if(e.key==='Escape'){ if(mode==='type'&&phase==='playing') typeSelect(null); return; }
   if(e.key!=='Enter') return;
+  e.preventDefault();
   if(locked||phase!=='playing'||mode!=='type') return;
   var inp=document.getElementById('typeInput');
   var raw=inp.value.trim();
-  if(!raw){inp.focus();return;}
+  if(!typeSelected||!raw){ shakeInput(); return; }
 
-  if(!typeSelected){
-    // Nothing clicked yet — shake to signal click first
-    inp.classList.add('shake');
-    setTimeout(function(){inp.classList.remove('shake');inp.focus();},350);
+  var id=typeSelected;
+  if(processed[id]) return;
+  var att=typeAtt[id]||0;
+
+  if(norm(raw)===norm(getPName(id))){
+    // Correct: color = the try it was solved on (1st white, 2nd yellow, 3rd orange, 4th red)
+    correct++;
+    fills[id]=CORRECT_COLORS[Math.min(att,3)];
+    done[id]=true; processed[id]=true;
+    flashName('correct');
+    typeSelect(null);
+    checkTypeEnd();
     return;
   }
 
-  // Confirm typed name matches the selected province
-  var selName=getPName(typeSelected);
-  if(norm(raw)!==norm(selName)){
-    inp.value='';
-    inp.classList.add('shake');
-    setTimeout(function(){inp.classList.remove('shake');inp.focus();},350);
-    return;
-  }
-
+  // Wrong: count it on this province and show the color of the try it is now on
+  mistakes++;
+  att++; typeAtt[id]=att;
   inp.value='';
-  inp.placeholder='Klicka ett landskap på kartan...';
-  makeGuess(typeSelected);
-  setTimeout(function(){inp.focus();},50);
+  shakeInput();
+  flashName('wrong');
+  if(att>=TYPE_MAX){
+    // Out of tries: reveal the name in deep red, province is finished (missed)
+    fills[id]='#B71C1C'; processed[id]=true;
+    typeSelect(null);
+    checkTypeEnd();
+    return;
+  }
+  fills[id]=CORRECT_COLORS[att];
+  updateDots(); renderMap();
 }
 
+function checkTypeEnd(){
+  if(typeSolvedCount()<PROVINCES.length) return;
+  showResults();
+}
+
+function rnd(n){
+  // Crypto-grade random int in [0,n), falls back to Math.random
+  try{var u=new Uint32Array(1);crypto.getRandomValues(u);return u[0]%n;}catch(e){return Math.floor(Math.random()*n);}
+}
 function shuffle(a) {
   var b=a.slice();
-  for (var i=b.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=b[i];b[i]=b[j];b[j]=t;}
+  for (var i=b.length-1;i>0;i--){var j=rnd(i+1);var t=b[i];b[i]=b[j];b[j]=t;}
   return b;
+}
+// Quiz order: brand-new random order each round, never opening like the last round
+var lastQuizOrder=[];
+function freshQuizOrder(){
+  var q, tries=0;
+  do {
+    q=shuffle(PROVINCES); tries++;
+    var same=0;
+    for(var i=0;i<5&&i<lastQuizOrder.length;i++) if(q[i].id===lastQuizOrder[i]) same++;
+  } while(lastQuizOrder.length && (q[0].id===lastQuizOrder[0]||same>1) && tries<50);
+  lastQuizOrder=q.map(function(p){return p.id;});
+  return q;
 }
 
 function fmt(s) {
@@ -191,6 +251,18 @@ function fmt(s) {
 }
 
 function updateDots() {
+  if(mode==='type'){
+    var a=typeSelected?(typeAtt[typeSelected]||0):0;
+    for(var t=1;t<=4;t++){
+      var dd=document.getElementById('d'+t);
+      var on=t<=a;
+      dd.style.background=on?DOT_BG[t-1]:'#1e2d3d';
+      dd.style.borderColor=on?DOT_BD[t-1]:'#2a3a4a';
+      dd.className='dot'+(typeSelected?'':' inactive');
+    }
+    document.getElementById('attInfo').textContent=typeSelected&&phase==='playing'?(TYPE_MAX-a)+' kvar':'';
+    return;
+  }
   var maxAtt = getMaxAttempts();
   for (var i=1;i<=4;i++) {
     var d=document.getElementById('d'+i);
@@ -217,6 +289,11 @@ function resetDots() {
 }
 
 function updateHUD() {
+  if(mode==='type'&&phase==='playing'){
+    document.getElementById('prog').textContent=typeSolvedCount()+' / 25';
+    document.getElementById('pname').textContent=typeSelected?'Vilket landskap?':'Klicka ett landskap';
+    return;
+  }
   var cur=(phase==='playing')?queue[idx]:null;
   document.getElementById('prog').textContent=
     phase==='playing'?correct+' / 25':phase==='results'?'25 / 25':'';
@@ -253,7 +330,8 @@ function renderMap() {
     var isTypeSel=mode==='type'&&typeSelected===p.id&&!processed[p.id];
     var sw=isDone?1.5:(isTypeSel?2.5:0.8);
     var strokeCol=isDone?'#ffffff':(isTypeSel?'#9C27B0':'#1a1a2e');
-    if(col==='#FF9800'||col==='#F44336'||col==='#7B0000') strokeCol='#fff';
+    if(!isTypeSel&&(col==='#FF9800'||col==='#F44336'||col==='#7B0000'||col==='#B71C1C')) strokeCol='#fff';
+    if(isTypeSel) sw=3;
     html+='<path data-id="'+p.id+'" d="'+p.path+
           '" fill="'+col+'" stroke="'+strokeCol+'" stroke-width="'+sw+
           '" stroke-opacity="0.9" style="cursor:pointer"/>';
@@ -335,13 +413,9 @@ function onPathClick(id) {
   if(locked||phase!=='playing') return;
   if(processed[id]) return;
   if(mode==='type') {
-    // Select this province; typing confirms the guess
-    typeSelected=id;
-    var inp=document.getElementById('typeInput');
-    inp.value='';
-    inp.placeholder='Skriv "'+getPName(id)+'" och tryck Enter...';
-    inp.focus();
-    renderMap();
+    // Select (or switch to) this province. The one left behind keeps its tries and color.
+    if(typeSelected===id){ document.getElementById('typeInput').focus(); return; }
+    typeSelect(id);
     return;
   }
   if(mode!=='quiz') return;
@@ -371,31 +445,13 @@ function advance() {
       if(!done[queue[i].id]) missedFromQueue.push(queue[i]);
     }
     if(missedFromQueue.length>0) {
-      queue=shuffle(missedFromQueue); idx=0;
+      // Retry round: reshuffle, and never start with the one just missed
+      var lastId=queue[queue.length-1].id, rq=shuffle(missedFromQueue), rt=0;
+      while(rq.length>1&&rq[0].id===lastId&&rt<20){rq=shuffle(missedFromQueue);rt++;}
+      queue=rq; idx=0;
       resetDots(); updateHUD(); renderMap(); return;
     }
-    // All done
-    clearInterval(timerInt); phase='results';
-    var score=mistakes===0&&correct===25?100:Math.round(correct/(correct+mistakes)*100);
-    logEvent(mode==='type'?'type_end':'quiz_end',{correct:correct,mistakes:mistakes,score:score,elapsed:fmt(elapsed)});
-    document.getElementById('wrongLabel').style.visibility='hidden';
-    document.getElementById('btnRestart').style.display='none';
-    var ov=document.getElementById('overlay');
-    ov.innerHTML=
-      '<h2>Klart!</h2>'+
-      '<div class="res-row"><span>Tid</span><strong>'+fmt(elapsed)+'</strong></div>'+
-      '<div class="res-row"><span>Fel</span><strong>'+mistakes+'</strong></div>'+
-      '<div class="res-row"><span>Poäng</span><strong>'+score+'%</strong></div>'+
-      '<div class="legend">'+
-      '<div class="leg-row"><div class="leg-sq" style="background:#fff;border:1px solid #ccc"></div><span>1:a försöket</span></div>'+
-      '<div class="leg-row"><div class="leg-sq" style="background:#FFC107"></div><span>2:a försöket</span></div>'+
-      '<div class="leg-row"><div class="leg-sq" style="background:#FF9800"></div><span>3:e försöket</span></div>'+
-      '<div class="leg-row"><div class="leg-sq" style="background:#F44336"></div><span>4:e försöket</span></div>'+
-      '</div>'+
-      '<button class="btn-start" id="btnReplay">Spela igen</button>';
-    ov.style.display='block';
-    document.getElementById('btnReplay').addEventListener('click',startQuiz);
-    renderMap(); return;
+    showResults(); return;
   }
   idx=nextIdx;
   resetDots(); updateHUD();
@@ -404,8 +460,66 @@ function advance() {
   renderMap();
 }
 
+var LEGEND_HTML=
+  '<div class="legend">'+
+  '<div class="leg-row"><div class="leg-sq" style="background:#fff;border:1px solid #ccc"></div><span>Rätt på 1:a försöket</span></div>'+
+  '<div class="leg-row"><div class="leg-sq" style="background:#FFC107"></div><span>Rätt på 2:a försöket</span></div>'+
+  '<div class="leg-row"><div class="leg-sq" style="background:#FF9800"></div><span>Rätt på 3:e försöket</span></div>'+
+  '<div class="leg-row"><div class="leg-sq" style="background:#F44336"></div><span>Rätt på 4:e försöket</span></div>'+
+  '<div class="leg-row"><div class="leg-sq" style="background:#B71C1C"></div><span>Missad (visas)</span></div>'+
+  '</div>';
+
+function showResults(){
+  clearInterval(timerInt); phase='results'; locked=false;
+  elapsed=Math.floor((Date.now()-startT)/1000);
+  document.getElementById('timer').textContent=fmt(elapsed);
+  var score=(correct+mistakes)===0?0:Math.round(correct/(correct+mistakes)*100);
+  var missed=25-correct;
+  logEvent(mode==='type'?'type_end':'quiz_end',{correct:correct,mistakes:mistakes,score:score,elapsed:fmt(elapsed)});
+  typeSelected=null;
+  document.getElementById('typeWrap').style.display='none';
+  document.getElementById('wrongLabel').style.visibility='hidden';
+  document.getElementById('btnRestart').style.display='none';
+  var ov=document.getElementById('overlay');
+  ov.innerHTML=
+    '<h2>Klart!</h2>'+
+    '<div class="res-row"><span>Tid</span><strong>'+fmt(elapsed)+'</strong></div>'+
+    '<div class="res-row"><span>Rätt</span><strong>'+correct+' / 25</strong></div>'+
+    (mode==='type'?'<div class="res-row"><span>Missade</span><strong>'+missed+'</strong></div>':'')+
+    '<div class="res-row"><span>Fel</span><strong>'+mistakes+'</strong></div>'+
+    '<div class="res-row"><span>Poäng</span><strong>'+score+'%</strong></div>'+
+    LEGEND_HTML+
+    '<button class="btn-start" id="btnReplay">Spela igen</button>';
+  ov.style.display='block';
+  document.getElementById('btnReplay').addEventListener('click',startQuiz);
+  resetDots(); updateHUD(); renderMap();
+}
+
+function showStartOverlay(){
+  var ov=document.getElementById('overlay');
+  var isType=mode==='type';
+  ov.innerHTML=
+    '<h2>'+(isType?'Skriv-läge':'Sveriges Landskap')+'</h2>'+
+    '<p>'+(isType?'Klicka ett landskap och skriv dess namn':'Klicka på rätt landskap på kartan')+'</p>'+
+    LEGEND_HTML+
+    '<button class="btn-start" id="btnStart">'+(isType?'Starta Skriv':'Starta quiz')+'</button>';
+  ov.style.display='block';
+  document.getElementById('btnStart').addEventListener('click',startQuiz);
+}
+
+function resetToStart(){
+  clearInterval(timerInt); phase='start'; locked=false;
+  queue=[]; idx=0; fills={}; done={}; processed={}; typeAtt={};
+  mistakes=0; correct=0; elapsed=0; typeSelected=null;
+  document.getElementById('timer').textContent='';
+  document.getElementById('wrongLabel').style.visibility='hidden';
+  document.getElementById('btnRestart').style.display='none';
+  document.getElementById('typeWrap').style.display='none';
+  resetDots(); updateHUD();
+}
+
 function startQuiz() {
-  queue=shuffle(PROVINCES); idx=0; fills={}; done={}; processed={};
+  queue=(mode==='quiz')?freshQuizOrder():[]; idx=0; fills={}; done={}; processed={}; typeAtt={};
   mistakes=0; correct=0; elapsed=0; locked=false; phase='playing';
   typeSelected=null;
   document.getElementById('overlay').style.display='none';
@@ -430,32 +544,18 @@ function startQuiz() {
 }
 
 function setMode(m) {
+  if(m===mode) return;           // clicking the active tab does nothing
   mode=m;
-  typeSelected=null;
   document.getElementById('btnQuiz').classList.toggle('active',m==='quiz');
   document.getElementById('btnType').classList.toggle('active',m==='type');
   document.getElementById('btnStudy').classList.toggle('active',m==='study');
-  var tw=document.getElementById('typeWrap');
-  var inp=document.getElementById('typeInput');
+  // Any tab switch ends the current round: Quiz and Skriv never share state
+  resetToStart();
   if(m==='study'){
-    if(phase==='playing'){clearInterval(timerInt);phase='start';}
     document.getElementById('overlay').style.display='none';
-    document.getElementById('wrongLabel').style.visibility='hidden';
-    document.getElementById('btnRestart').style.display='none';
-    tw.style.display='none';
     logEvent('study_open');
-    resetDots();
-  } else if(m==='type'){
-    if(phase==='start') document.getElementById('overlay').style.display='block';
-    tw.style.display=(phase==='playing')?'flex':'none';
-    if(phase==='playing'){
-      inp.value=''; inp.placeholder='Klicka ett landskap på kartan...';
-      setTimeout(function(){inp.focus();},50);
-    }
   } else {
-    // quiz
-    tw.style.display='none';
-    if(phase==='start') document.getElementById('overlay').style.display='block';
+    showStartOverlay();
   }
   renderMap();
 }
