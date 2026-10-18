@@ -97,8 +97,9 @@ var DOT_BG     = ['#FFC107','#FF9800','#F44336','#7B0000'];
 var DOT_BD     = ['#FFC107','#FF9800','#F44336','#900000'];
 
 var mode='quiz', phase='start', queue=[], idx=0;
-var fills={};   // id -> current fill color
-var done={};    // id -> true when correctly answered (shows label)
+var fills={};      // id -> current fill color
+var done={};       // id -> true when correctly answered (shows label)
+var processed={};  // id -> true when done or revealed (blocks re-clicking)
 var mistakes=0, correct=0, elapsed=0, locked=false;
 var timerInt=null, startT=0;
 var curAttempts=0, curWrongIds=[];
@@ -178,9 +179,12 @@ function renderMap() {
     var p=PROVINCES[i];
     var col=fills[p.id]||'#c8d8e8';
     var isCur=cur&&p.id===cur.id&&phase==='playing'&&mode==='quiz';
-    var sw=isCur?2.5:0.8;
+    var isDone=done[p.id];
+    var sw=isCur?2.5:isDone?1.5:0.8;
+    var strokeCol=isDone?'#ffffff':'#1a1a2e';
+    if(col==='#FF9800'||col==='#F44336'||col==='#7B0000') strokeCol='#fff';
     html+='<path data-id="'+p.id+'" d="'+p.path+
-          '" fill="'+col+'" stroke="#1a1a2e" stroke-width="'+sw+
+          '" fill="'+col+'" stroke="'+strokeCol+'" stroke-width="'+sw+
           '" stroke-opacity="0.9" style="cursor:pointer"/>';
     // Show label if: correctly answered, or study mode, or revealed (B71C1C)
     var showLabel=mode==='study'||done[p.id]||(fills[p.id]==='#B71C1C');
@@ -203,7 +207,7 @@ function renderMap() {
   for(var j=0;j<paths.length;j++) {
     (function(path){
       path.addEventListener('mouseenter',function(){
-        if(!done[this.dataset.id]&&this.getAttribute('fill')==='#c8d8e8')
+        if(!processed[this.dataset.id]&&this.getAttribute('fill')==='#c8d8e8')
           this.setAttribute('fill','#a0bcd4');
       });
       path.addEventListener('mouseleave',function(){
@@ -218,7 +222,7 @@ function onPathClick(id) {
   if(locked||phase!=='playing'||mode!=='quiz') return;
   var cur=queue[idx];
   if(!cur) return;
-  if(done[id]) return; // can't click already-done provinces
+  if(processed[id]) return; // block already-done or already-revealed provinces
 
   if(id===cur.id) {
     // CORRECT
@@ -226,11 +230,12 @@ function onPathClick(id) {
     var col=CORRECT_COLORS[Math.min(curAttempts,3)];
     fills[cur.id]=col;
     done[cur.id]=true;
+    processed[cur.id]=true;
     // Clear this round's wrong fills
     for(var i=0;i<curWrongIds.length;i++) delete fills[curWrongIds[i]];
     flashName('correct');
     renderMap();
-    setTimeout(function(){locked=false;advance();},700);
+    setTimeout(function(){locked=false;advance();},300);
   } else {
     // Already tried this wrong province this round?
     for(var k=0;k<curWrongIds.length;k++) if(curWrongIds[k]===id) return;
@@ -246,14 +251,14 @@ function onPathClick(id) {
       locked=true;
       setTimeout(function(){
         fills[cur.id]='#B71C1C';
-        // Don't mark as done — goes to retry
+        processed[cur.id]=true; // block re-clicking during retry round
         renderMap();
         setTimeout(function(){
           for(var i=0;i<curWrongIds.length;i++) delete fills[curWrongIds[i]];
           locked=false;
           advance();
-        },1400);
-      },400);
+        },600);
+      },150);
     }
   }
 }
@@ -309,7 +314,7 @@ function advance() {
 }
 
 function startQuiz() {
-  queue=shuffle(PROVINCES); idx=0; fills={}; done={};
+  queue=shuffle(PROVINCES); idx=0; fills={}; done={}; processed={};
   mistakes=0; correct=0; elapsed=0; locked=false; phase='playing';
   document.getElementById('overlay').style.display='none';
   document.getElementById('wrongLabel').style.visibility='visible';
