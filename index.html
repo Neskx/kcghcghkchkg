@@ -39,6 +39,11 @@ svg{width:auto;height:100%;max-height:calc(100dvh - 150px)}
 .legend{margin:10px 0 8px;display:flex;flex-direction:column;gap:4px;text-align:left;font-size:11px}
 .leg-row{display:flex;align-items:center;gap:8px}
 .leg-sq{width:14px;height:14px;border-radius:3px;flex-shrink:0}
+.type-wrap{display:none;justify-content:center;margin-bottom:6px;flex-shrink:0}
+.type-input{background:#1a2a3a;border:1.5px solid #2a4a6a;border-radius:20px;color:#e8edf2;font-size:14px;font-weight:600;padding:5px 18px;width:230px;outline:none;text-align:center;transition:border-color .2s,box-shadow .2s}
+.type-input:focus{border-color:#2196F3;box-shadow:0 0 0 2px rgba(33,150,243,.25)}
+.type-input.shake{animation:shake .3s ease}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-7px)}75%{transform:translateX(7px)}}
 </style>
 </head>
 <body>
@@ -56,6 +61,9 @@ svg{width:auto;height:100%;max-height:calc(100dvh - 150px)}
   <div class="controls">
     <button class="btn btn-quiz active" id="btnQuiz">Quiz</button>
     <button class="btn btn-study" id="btnStudy">Studera</button>
+  </div>
+  <div class="type-wrap" id="typeWrap">
+    <input class="type-input" id="typeInput" type="text" placeholder="Skriv landskap och tryck Enter..." autocomplete="off" spellcheck="false"/>
   </div>
   <div class="game-row">
     <div class="sidebar">
@@ -107,6 +115,40 @@ var curAttempts=0, curWrongIds=[];
 function getMaxAttempts() {
   var remaining = queue.length - idx; // remaining including current
   return Math.max(1, Math.min(4, remaining - 1));
+}
+
+function norm(s){
+  return s.toLowerCase()
+    .replace(/å/g,'a').replace(/ä/g,'a').replace(/ö/g,'o')
+    .replace(/é/g,'e').replace(/\s+/g,' ').trim();
+}
+
+function handleTypeInput(e){
+  if(e.key!=='Enter') return;
+  if(locked||phase!=='playing'||mode!=='quiz') return;
+  var cur=queue[idx]; if(!cur) return;
+  var raw=document.getElementById('typeInput').value.trim();
+  document.getElementById('typeInput').value='';
+  if(!raw){document.getElementById('typeInput').focus();return;}
+  // Find matching province by name
+  var match=null;
+  var rawN=norm(raw);
+  for(var i=0;i<PROVINCES.length;i++){
+    if(norm(PROVINCES[i].name)===rawN){match=PROVINCES[i];break;}
+  }
+  if(!match){
+    // No known province — shake
+    var inp=document.getElementById('typeInput');
+    inp.classList.add('shake');
+    setTimeout(function(){inp.classList.remove('shake');inp.focus();},350);
+    return;
+  }
+  // Delegate to onPathClick logic
+  onPathClick(match.id);
+  setTimeout(function(){
+    var ti=document.getElementById('typeInput');
+    if(ti) ti.focus();
+  },50);
 }
 
 function shuffle(a) {
@@ -324,6 +366,8 @@ function startQuiz() {
     elapsed=Math.floor((Date.now()-startT)/1000);
     document.getElementById('timer').textContent=fmt(elapsed);
   },500);
+  document.getElementById('typeWrap').style.display='flex';
+  setTimeout(function(){document.getElementById('typeInput').focus();},50);
   resetDots(); updateHUD(); updateDots(); renderMap();
 }
 
@@ -336,6 +380,7 @@ function setMode(m) {
     document.getElementById('overlay').style.display='none';
     document.getElementById('wrongLabel').style.visibility='hidden';
     document.getElementById('btnRestart').style.display='none';
+    document.getElementById('typeWrap').style.display='none';
     resetDots();
   } else {
     if(phase==='start') document.getElementById('overlay').style.display='block';
@@ -343,6 +388,7 @@ function setMode(m) {
   renderMap();
 }
 
+document.getElementById('typeInput').addEventListener('keydown',handleTypeInput);
 document.getElementById('btnStart').addEventListener('click',startQuiz);
 document.getElementById('btnRestart').addEventListener('click',startQuiz);
 document.getElementById('btnQuiz').addEventListener('click',function(){setMode('quiz');});
